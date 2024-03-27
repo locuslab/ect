@@ -53,13 +53,16 @@ We compare ECMs' unconditional image generation capabilities with SoTA generativ
 | ECM (400k)         | 2.11 | 2 | DDPM++ | 55.7M | 128 | 400k | 
 
 
-Since DINOv2 could produce evaluation better aligned with human vision, we evaluate the image fidelity using Fréchet Distance in the latent space of SoTA open-source representation model DINOv2, denoted as [$\mathrm{FD}_{\text{DINOv2}}$](https://github.com/layer6ai-labs/dgm-eval/tree/master). 
+Since DINOv2 could produce evaluation better aligned with human vision, we evaluate the image fidelity using Fréchet Distance in the latent space of SoTA open-source representation model DINOv2, denoted as 
+$\mathrm{FD}_{\text{DINOv2}}$.
+
+Using [dgm-eval](https://github.com/layer6ai-labs/dgm-eval/tree/master), we have $\mathrm{FD}_{\text{DINOv2}}$ against SoTA Diffusion Models and GANs.
 
 | Method |  $\mathrm{FD}_{\text{DINOv2}}$  | NFE | 
 | :----  |  :-- | :-- |
-| EDM            | 145.20 | 35  |
-| StyleGAN-XL    | 204.60 | 1   |
-| ECM            | 149.27 | 2   |
+| [EDM](https://github.com/NVlabs/edm)                                        | 145.20 | 35  |
+| [StyleGAN-XL](https://github.com/autonomousvision/stylegan-xl/tree/main)    | 204.60 | 1   |
+| ECM                                                                         | 149.27 | 2   |
 
 Even without combining with other generative mechanisms like GANs or diffusion distillation like Score Distillation, ECT is capable of generating high-quality samples much faster than SoTA diffusion models and much better than SoTA GANs.
 
