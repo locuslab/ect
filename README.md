@@ -6,6 +6,8 @@ ECT unlocks SoTA few-step generative abilities through a simple yet principled a
 
 Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only need to fine-tune a bit. :D
 
+![Comparison of Learning Schemes](./assets/learning_scheme.png)
+
 ## Datasets
 
 Prepare the dataset to EDM's format. See a reference [here](https://github.com/NVlabs/edm?tab=readme-ov-file#preparing-datasets).
