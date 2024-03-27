@@ -1,10 +1,10 @@
-# ECM: Consistency Models Made Easy
+# ECT: Consistency Models Made Easy
 
-Pytorch implementation for Easy Consistency Tuning (ECT).
+Pytorch implementation for [Easy Consistency Tuning (ECT)](https://www.notion.so/gsunshine/Consistency-Models-Made-Easy-954205c0b4a24c009f78719f43b419cc).
 
-ECT is the key to unlocking SoTA few-step generative capabilities through a simple yet principled approach. With just a negligible tuning cost, ECT demonstrates promising early results while benefiting from the scaling in training FLOPs to continuously enhance its few-step generation capability.
+ECT unlocks SoTA few-step generative abilities through a simple yet principled approach. With just a negligible tuning cost, ECT demonstrates promising early results while benefiting from the scaling in training FLOPs to continuously enhance its few-step generation capability.
 
-You only need to fine-tune a bit. :D
+Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only need to fine-tune a bit. :D
 
 ## Datasets
 
@@ -34,9 +34,9 @@ We compare ECMs' unconditional image generation capabilities with SoTA generativ
 
 | Method |  FID | NFE | Model  | Params | Batch Size | Schedule |
 | :----  |  :-- | :-- |:---   | :----- | :--------- | :------- |
-| Score SDE | 2.38 | 2000 | NCSN++ | 56.4M | 128 | >1500k | 
-| Score SDE-deep | 2.20 | 2000 | NCSN++ (2 $\times$ depth) | > 100M | 128 | >1500k |
-| EDM                | 8.34 | 1 | DDPM++ | 56.4M | 512 | 800k |
+| Score SDE | 2.38 | 2000 | NCSN++ | 56.4M | 128 | ~1600k | 
+| Score SDE-deep | 2.20 | 2000 | NCSN++ (2 $\times$ depth) | > 100M | 128 | ~1600k |
+| EDM                | 8.34 | 1 | DDPM++ | 56.4M | 512 | 400k |
 | PD                 | 8.34 | 1 | DDPM++ | 56.4M | 512 | 800k | 
 | Diff-Instruct      | 4.53 | 1 | DDPM++ | 56.4M | 512 | 800k | 
 | CD (LPIPS)         | 3.55 | 1 | NCSN++ | 56.4M | 512 | 800k | 
@@ -50,3 +50,24 @@ We compare ECMs' unconditional image generation capabilities with SoTA generativ
 | ECM (400k)         | 3.60 | 1 | DDPM++ | 55.7M | 128 | 400k |
 | ECM (400k)         | 2.11 | 2 | DDPM++ | 55.7M | 128 | 400k | 
 
+
+Since DINOv2 could produce evaluation better aligned with human vision, we evaluate the image fidelity using Fréchet Distance in the latent space of SoTA open-source representation model DINOv2, denoted as [$\mathrm{FD}_{\text{DINOv2}}$](https://github.com/layer6ai-labs/dgm-eval/tree/master). 
+
+| Method |  $\mathrm{FD}_{\text{DINOv2}}$  | NFE | 
+| :----  |  :-- | :-- |
+| EDM            | 145.20 | 35  |
+| StyleGAN-XL    | 204.60 | 1   |
+| ECM            | 149.27 | 2   |
+
+Even without combining with other generative mechanisms like GANs or diffusion distillation like Score Distillation, ECT is capable of generating high-quality samples much faster than SoTA diffusion models and much better than SoTA GANs.
+
+## Citation
+
+```bibtex
+@misc{ect,
+    title  = {Consistency Models Made Easy},
+    author = {Geng, Zhengyang and Luo, William and Pokle, Ashwini and Kolter, Zico},
+    year   = {2024},
+    url    = {https://gsunshine.notion.site/Consistency-Models-Made-Easy-954205c0b4a24c009f78719f43b419cc?pvs=4}
+}
+```
