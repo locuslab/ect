@@ -168,26 +168,6 @@ def open_cifar10(tarball: str, *, max_images: Optional[int]):
 
     return max_idx, iterate_images()
 
-
-def open_npy_noise_image_label_data(tarball: str, *, max_images: Optional[int]):
-
-    images = np.load(tarball)
-    images = images.transpose([0, 2, 3, 1]) # NCHW -> NHWC
-    labels = np.zeros((images.shape[0],), dtype=np.int32)
-
-    # assert images.shape == (50, 32, 32, 6)
-    # assert labels.shape == (50,) and labels.dtype in [np.int32, np.int64]
-
-    max_idx = maybe_min(len(images), max_images)
-
-    def iterate_images():
-        for idx, img in enumerate(images):
-            yield dict(img=img, label=int(labels[idx]))
-            if idx >= max_idx - 1:
-                break
-
-    return max_idx, iterate_images()
-
 #----------------------------------------------------------------------------
 
 def open_mnist(images_gz: str, *, max_images: Optional[int]):
@@ -261,8 +241,6 @@ def make_transform(
         canvas[(width - height) // 2 : (width + height) // 2, :] = img
         return canvas
 
-    if transform == 'identity':
-        return lambda x: x
     if transform is None:
         return functools.partial(scale, output_width, output_height)
     if transform == 'center-crop':
@@ -290,9 +268,6 @@ def open_dataset(source, *, max_images: Optional[int]):
             return open_mnist(source, max_images=max_images)
         elif file_ext(source) == 'zip':
             return open_image_zip(source, max_images=max_images)
-        
-        elif file_ext(source) == 'npy':
-            return open_npy_noise_image_label_data(source, max_images=max_images)
         else:
             assert False, 'unknown archive type'
     else:
@@ -336,7 +311,7 @@ def open_dest(dest: str) -> Tuple[str, Callable[[str, Union[bytes, str]], None],
 @click.option('--source',     help='Input directory or archive name', metavar='PATH',   type=str, required=True)
 @click.option('--dest',       help='Output directory or archive name', metavar='PATH',  type=str, required=True)
 @click.option('--max-images', help='Maximum number of images to output', metavar='INT', type=int)
-@click.option('--transform',  help='Input crop/resize mode', metavar='MODE',            type=click.Choice(['center-crop', 'center-crop-wide', 'identity']))
+@click.option('--transform',  help='Input crop/resize mode', metavar='MODE',            type=click.Choice(['center-crop', 'center-crop-wide']))
 @click.option('--resolution', help='Output resolution (e.g., 512x512)', metavar='WxH',  type=parse_tuple)
 
 def main(
@@ -438,18 +413,16 @@ def main(
             height = dataset_attrs['height']
             if width != height:
                 raise click.ClickException(f'Image dimensions after scale and crop are required to be square.  Got {width}x{height}')
-            if dataset_attrs['channels'] not in [1, 3, 6]:
+            if dataset_attrs['channels'] not in [1, 3]:
                 raise click.ClickException('Input images must be stored as RGB or grayscale')
             if width != 2 ** int(np.floor(np.log2(width))):
                 raise click.ClickException('Image width/height after scale and crop are required to be power-of-two')
         elif dataset_attrs != cur_image_attrs:
             err = [f'  dataset {k}/cur image {k}: {dataset_attrs[k]}/{cur_image_attrs[k]}' for k in dataset_attrs.keys()]
             raise click.ClickException(f'Image {archive_fname} attributes must be equal across all images of the dataset.  Got:\n' + '\n'.join(err))
-        
-        img, noise = np.split(img, 2, axis=-1)
 
         # Save the image as an uncompressed PNG.
-        img = PIL.Image.fromarray(img, {1: 'L', 3: 'RGB', 6: 'RGB'}[channels])
+        img = PIL.Image.fromarray(img, {1: 'L', 3: 'RGB'}[channels])
         image_bits = io.BytesIO()
         img.save(image_bits, format='png', compress_level=0, optimize=False)
         save_bytes(os.path.join(archive_root_dir, archive_fname), image_bits.getbuffer())

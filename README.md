@@ -38,19 +38,19 @@ We compare ECMs' unconditional image generation capabilities with SoTA generativ
 | :----  |  :-- | :-- |:---   | :----- | :--------- | :------- |
 | Score SDE | 2.38 | 2000 | NCSN++ | 56.4M | 128 | ~1600k | 
 | Score SDE-deep | 2.20 | 2000 | NCSN++ (2 $\times$ depth) | > 100M | 128 | ~1600k |
-| EDM                | 8.34 | 1 | DDPM++ | 56.4M | 512 | 400k |
-| PD                 | 8.34 | 1 | DDPM++ | 56.4M | 512 | 800k | 
-| Diff-Instruct      | 4.53 | 1 | DDPM++ | 56.4M | 512 | 800k | 
-| CD (LPIPS)         | 3.55 | 1 | NCSN++ | 56.4M | 512 | 800k | 
-| CD (LPIPS)         | 2.93 | 2 | NCSN++ | 56.4M | 512 | 800k | 
-| iCT-deep           | 2.51 | 1 | NCSN++ (2 $\times$ depth) | > 100M | 1024 | 400k | 
-| iCT-deep           | 2.24 | 2 | NCSN++ (2 $\times$ depth) | > 100M | 1024 | 400k | 
-| ECM (100k)         | 4.54 | 1 | DDPM++ | 55.7M | 128 | 100k |
-| ECM (100k)         | 2.15 | 2 | DDPM++ | 55.7M | 128 | 100k | 
-| ECM (200k)         | 3.86 | 1 | DDPM++ | 55.7M | 128 | 200k |
-| ECM (200k)         | 2.15 | 2 | DDPM++ | 55.7M | 128 | 200k | 
-| ECM (400k)         | 3.60 | 1 | DDPM++ | 55.7M | 128 | 400k |
-| ECM (400k)         | 2.11 | 2 | DDPM++ | 55.7M | 128 | 400k | 
+| EDM                | 2.01 | 35 | DDPM++ | 56.4M | 512 | 400k |
+| PD                 | 8.34 | 1  | DDPM++ | 56.4M | 512 | 800k | 
+| Diff-Instruct      | 4.53 | 1  | DDPM++ | 56.4M | 512 | 800k | 
+| CD (LPIPS)         | 3.55 | 1  | NCSN++ | 56.4M | 512 | 800k | 
+| CD (LPIPS)         | 2.93 | 2  | NCSN++ | 56.4M | 512 | 800k | 
+| iCT-deep           | 2.51 | 1  | NCSN++ (2 $\times$ depth) | > 100M | 1024 | 400k | 
+| iCT-deep           | 2.24 | 2  | NCSN++ (2 $\times$ depth) | > 100M | 1024 | 400k | 
+| ECM (100k)         | 4.54 | 1  | DDPM++ | 55.7M | 128 | 100k |
+| ECM (100k)         | 2.20 | 2  | DDPM++ | 55.7M | 128 | 100k | 
+| ECM (200k)         | 3.86 | 1  | DDPM++ | 55.7M | 128 | 200k |
+| ECM (200k)         | 2.15 | 2  | DDPM++ | 55.7M | 128 | 200k | 
+| ECM (400k)         | 3.60 | 1  | DDPM++ | 55.7M | 128 | 400k |
+| ECM (400k)         | 2.11 | 2  | DDPM++ | 55.7M | 128 | 400k | 
 
 
 Since DINOv2 could produce evaluation better aligned with human vision, we evaluate the image fidelity using Fréchet Distance in the latent space of SoTA open-source representation model DINOv2, denoted as 
