@@ -6,11 +6,19 @@ ECT unlocks SoTA few-step generative abilities through a simple yet principled a
 
 Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only need to fine-tune a bit. :D
 
-![Comparison of Learning Schemes](./assets/learning_scheme.png)
+<div align="center">
+    <img src="./assets/learning_scheme.jpg" width="500" alt="Comparison of Learning Schemes">
+</div>
+
+## ⭐ Update ⭐
+
+Baking more in the oven. 🙃 
+
+- **2024.04.12** - ECMs can now surpass SoTA GANs using 1 model step and SoTA Diffusion Models using 2 model steps on CIFAR10. Checkpoints available.
 
 ## Datasets
 
-Prepare the dataset to EDM's format. See a reference [here](https://github.com/NVlabs/edm?tab=readme-ov-file#preparing-datasets).
+Prepare the dataset to the EDM's format. See a reference [here](https://github.com/NVlabs/edm?tab=readme-ov-file#preparing-datasets).
 
 ## Training
 
@@ -32,6 +40,8 @@ bash eval_ecm.sh <NGPUs> <PORT> --resume <CKPT_PATH>
 
 ## Generative Performance
 
+### FID Evaluation
+
 We compare ECMs' unconditional image generation capabilities with SoTA generative models on the CIFAR10 dataset, including popular diffusion models w/ advanced samplers, diffusion distillations, and consistency models on the CIFAR10 dataset.
 
 | Method |  FID | NFE | Model  | Params | Batch Size | Schedule |
@@ -52,9 +62,12 @@ We compare ECMs' unconditional image generation capabilities with SoTA generativ
 | ECM (400k)         | 3.60 | 1  | DDPM++ | 55.7M | 128 | 400k |
 | ECM (400k)         | 2.11 | 2  | DDPM++ | 55.7M | 128 | 400k | 
 
+### $\mathrm{FD}_{\text{DINOv2}}$ Evaluation
 
 Since DINOv2 could produce evaluation better aligned with human vision, we evaluate the image fidelity using Fréchet Distance in the latent space of SoTA open-source representation model DINOv2, denoted as 
 $\mathrm{FD}_{\text{DINOv2}}$.
+
+---
 
 Using [dgm-eval](https://github.com/layer6ai-labs/dgm-eval/tree/master), we have $\mathrm{FD}_{\text{DINOv2}}$ against SoTA Diffusion Models and GANs.
 
@@ -62,9 +75,23 @@ Using [dgm-eval](https://github.com/layer6ai-labs/dgm-eval/tree/master), we have
 | :----  |  :-- | :-- |
 | [EDM](https://github.com/NVlabs/edm)                                        | 145.20 | 35  |
 | [StyleGAN-XL](https://github.com/autonomousvision/stylegan-xl/tree/main)    | 204.60 | 1   |
-| ECM                                                                         | 149.27 | 2   |
+ECM                                                                           | 198.51 | 1   | 
+ECM                                                                           | 128.63 | 2   |
 
-Even without combining with other generative mechanisms like GANs or diffusion distillation like Score Distillation, ECT is capable of generating high-quality samples much faster than SoTA diffusion models and much better than SoTA GANs.
+Even without combining with other generative mechanisms like GANs or diffusion distillation like Score Distillation, ECT is capable of generating high-quality samples much faster than SoTA diffusion models and much better than ~~SoTA GANs~~ SoTA Diffusion Models and GANs.
+
+## Checkpoints
+
+More checkpoints will be available later.
+
+- CIFAR10 $\mathrm{FD}_{\text{DINOv2}}$ [checkpoint](https://drive.google.com/file/d/1WN_eLTrcl-vB7fMc1HADpacgcO4SNJ_1/view?usp=sharing).
+
+
+## Contact
+
+Please drop me an email at zhengyanggeng@gmail.com if you'd like to train models together!!!
+
+Feel free to contact me if you have additional questions or have interests in collaboration. Find me at [Twitter](https://twitter.com/ZhengyangGeng) or [WeChat](https://github.com/Gsunshine/Enjoy-Hamburger/blob/main/assets/WeChat.jpg). :D
 
 ## Citation
 
