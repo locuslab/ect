@@ -135,6 +135,8 @@ def training_loop(
     np.random.seed((seed * dist.get_world_size() + dist.get_rank()) % (1 << 31))
     torch.manual_seed(np.random.randint(1 << 31))
     torch.backends.cudnn.benchmark = cudnn_benchmark
+
+    # Enable these to speed up on A100 GPUs
     torch.backends.cudnn.allow_tf32 = False
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -157,22 +159,24 @@ def training_loop(
     interface_kwargs = dict(img_resolution=dataset_obj.resolution, img_channels=dataset_obj.num_channels, label_dim=dataset_obj.label_dim)
     net = dnnlib.util.construct_class_by_name(**network_kwargs, **interface_kwargs) # subclass of torch.nn.Module
     net.train().requires_grad_(True).to(device)
-    if dist.get_rank() == 0:
-        with torch.no_grad():
-            images = torch.zeros([batch_gpu, net.img_channels, net.img_resolution, net.img_resolution], device=device)
-            sigma = torch.ones([batch_gpu], device=device)
-            labels = torch.zeros([batch_gpu, net.label_dim], device=device)
-            misc.print_module_summary(net, [images, sigma, labels], max_nesting=2)
-
+    
     # Setup optimizer.
     dist.print0('Setting up optimizer...')
-    loss_fn = dnnlib.util.construct_class_by_name(**loss_kwargs).to(device) # training.loss.(VP|VE|EDM)Loss
+    loss_fn = dnnlib.util.construct_class_by_name(**loss_kwargs)
     optimizer = dnnlib.util.construct_class_by_name(params=net.parameters(), **optimizer_kwargs) # subclass of torch.optim.Optimizer
     augment_pipe = dnnlib.util.construct_class_by_name(**augment_kwargs) if augment_kwargs is not None else None # training.augment.AugmentPipe
     
     dist.print0('Setting up DDP...')
     ddp = torch.nn.parallel.DistributedDataParallel(net, device_ids=[device], broadcast_buffers=False)
     ema = copy.deepcopy(net).eval().requires_grad_(False)
+    
+    # Stats
+    if dist.get_rank() == 0:
+        with torch.no_grad():
+            images = torch.zeros([batch_gpu, net.img_channels, net.img_resolution, net.img_resolution], device=device)
+            sigma = torch.ones([batch_gpu], device=device)
+            labels = torch.zeros([batch_gpu, net.label_dim], device=device)
+            misc.print_module_summary(net, [images, sigma, labels], max_nesting=2)
 
     # Resume training from previous snapshot.
     if resume_pkl is not None:
