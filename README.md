@@ -32,6 +32,12 @@ Prepare the dataset to the EDM's format. See a reference [here](https://github.c
 
 ## Training
 
+Run the following command to tune your SoTA 2-step ECM and suppass Consistency Distillation (CD) within 1 A100 GPU hour. 
+
+```bash
+bash run_ecm_1hour.sh 1 <PORT> --desc bs128.1hour
+```
+
 Run the following command to run ECT at batch size 128 and 200k iterations. NGPUs=2/4 is recommended. 
 
 ```bash

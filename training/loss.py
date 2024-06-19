@@ -15,14 +15,9 @@ class ECMLoss:
         self.P_std = P_std
         self.sigma_data = sigma_data
         
-        if adj == 'logsnr':
-            dist.print0('logsnr')
-            self.t_to_r = self.t_to_r_logsnr
-        elif adj == 'power':
-            dist.print0('power')
-            self.t_to_r = self.t_to_r_power
+        if adj == 'const':
+            self.t_to_r = self.t_to_r_const
         elif adj == 'sigmoid':
-            dist.print0('sigmoid')
             self.t_to_r = self.t_to_r_sigmoid
         else:
             raise ValueError(f'Unknow schedule type {adj}!')
@@ -33,33 +28,22 @@ class ECMLoss:
         
         self.k = k
         self.b = b
-        self.cut = cut
 
         self.c = c
-        dist.print0(f'P_mean: {self.P_mean}, P_std: {self.P_std}, q: {self.q}, k {self.k}, b {self.b}, cut {self.cut}, c: {self.c}')
+        dist.print0(f'P_mean: {self.P_mean}, P_std: {self.P_std}, q: {self.q}, k {self.k}, b {self.b}, c: {self.c}')
 
     def update_schedule(self, stage):
         self.stage = stage
         self.ratio = 1 - 1 / self.q ** (stage+1)
-    
+
+    def t_to_r_const(self, t):
+        decay = 1 / self.q ** (self.stage+1)
+        ratio = 1 - decay
+        r = t * ratio
+        return torch.clamp(r, min=0)
+
     def t_to_r_sigmoid(self, t):
         adj = 1 + self.k * torch.sigmoid(-self.b * t)
-        decay = 1 / self.q ** (self.stage+1)
-        ratio = 1 - decay * adj
-        r = t * ratio
-        return torch.clamp(r, min=0)
-
-    def t_to_r_logsnr(self, t):
-        adj = 1 + self.k * torch.log2(1 + 1/t**2)
-        adj = torch.clamp(adj, max=self.cut)
-        decay = 1 / self.q ** (self.stage+1)
-        ratio = 1 - decay * adj
-        r = t * ratio
-        return torch.clamp(r, min=0)
-
-    def t_to_r_power(self, t):
-        adj = 1 + 1 / (t ** self.k)
-        adj = torch.clamp(adj, max=self.cut)
         decay = 1 / self.q ** (self.stage+1)
         ratio = 1 - decay * adj
         r = t * ratio
@@ -71,7 +55,7 @@ class ECMLoss:
         t = (rnd_normal * self.P_std + self.P_mean).exp()
         r = self.t_to_r(t)
 
-        # Augmentation
+        # Augmentation if needed
         y, augment_labels = augment_pipe(images) if augment_pipe is not None else (images, None)
         
         # Shared noise direction
@@ -98,7 +82,7 @@ class ECMLoss:
         loss = (D_yt - D_yr) ** 2
         loss = torch.sum(loss.reshape(loss.shape[0], -1), dim=-1)
         
-        # Huber Loss if needed
+        # Producing Adaptive Weighting (p=0.5) through Huber Loss
         if self.c > 0:
             loss = torch.sqrt(loss + self.c ** 2) - self.c
         else:

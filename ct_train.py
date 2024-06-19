@@ -65,17 +65,18 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--mean',          help='P_mean of Log Normal Distribution', metavar='FLOAT',         type=click.FloatRange(), default=-1.1, show_default=True)
 @click.option('--std',           help='P_std of Log Normal Distribution', metavar='FLOAT',          type=click.FloatRange(), default=2.0, show_default=True)
 
-@click.option('--mapping',       help='Type of mapping fn', metavar='STR',                          type=click.Choice(['logsnr', 'power', 'sigmoid']), default='sigmoid', show_default=True)
+@click.option('--mapping',       help='Type of mapping fn', metavar='STR',                          type=click.Choice(['const', 'sigmoid']), default='sigmoid', show_default=True)
 @click.option('--double',        help='How often to reduce dt', metavar='TICKS',                    type=click.IntRange(min=1), default=500, show_default=True)
 
 @click.option('-q',              help='Decay Factor', metavar='FLOAT',                              type=click.FloatRange(min=0, min_open=True), default=2.0, show_default=True)
-@click.option('-c',              help='Constant c for Huber Loss', metavar='FLOAT',                 type=click.FloatRange(), default=0.0, show_default=True)
 @click.option('-k',              help='Mapping fn hyperparams', metavar='FLOAT',                    type=click.FloatRange(), default=8.0, show_default=True)
 @click.option('-b',              help='Mapping fn hyperparams', metavar='FLOAT',                    type=click.FloatRange(), default=1.0, show_default=True)
-@click.option('--cut',           help='Cutoff value.', metavar='FLOAT',                             type=click.FloatRange(), default=4.0, show_default=True)
+
+@click.option('-c',              help='Constant c for Adaptive Weighting', metavar='FLOAT',         type=click.FloatRange(), default=0.0, show_default=True)
 
 # Performance-related.
 @click.option('--fp16',          help='Enable mixed-precision training', metavar='BOOL',            type=bool, default=False, show_default=True)
+@click.option('--tf32',          help='Enable tf32 for A100/H100 training speed', metavar='BOOL',   type=bool, default=False, show_default=True)
 @click.option('--ls',            help='Loss scaling', metavar='FLOAT',                              type=click.FloatRange(min=0, min_open=True), default=1, show_default=True)
 @click.option('--bench',         help='Enable cuDNN benchmarking', metavar='BOOL',                  type=bool, default=True, show_default=True)
 @click.option('--cache',         help='Cache dataset in CPU memory', metavar='BOOL',                type=bool, default=True, show_default=True)
@@ -114,7 +115,7 @@ def main(**kwargs):
     c.dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=opts.data, use_labels=opts.cond, xflip=opts.xflip, cache=opts.cache)
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, num_workers=opts.workers, prefetch_factor=2)
     c.network_kwargs = dnnlib.EasyDict()
-    c.loss_kwargs = dnnlib.EasyDict(P_mean=opts.mean, P_std=opts.std, q=opts.q, c=opts.c, k=opts.k, b=opts.b, cut=opts.cut, adj=opts.mapping)
+    c.loss_kwargs = dnnlib.EasyDict(P_mean=opts.mean, P_std=opts.std, q=opts.q, c=opts.c, k=opts.k, b=opts.b, adj=opts.mapping)
     c.optimizer_kwargs = dnnlib.EasyDict(class_name=f'torch.optim.{opts.optim}', lr=opts.lr, betas=[0.9,0.999], eps=1e-8)
 
     # Validate dataset options.
@@ -163,7 +164,7 @@ def main(**kwargs):
     c.ema_halflife_kimg = int(opts.ema * 1000) if opts.ema is not None else opts.ema
     c.ema_beta = opts.ema_beta
     c.update(batch_size=opts.batch, batch_gpu=opts.batch_gpu)
-    c.update(loss_scaling=opts.ls, cudnn_benchmark=opts.bench)
+    c.update(loss_scaling=opts.ls, cudnn_benchmark=opts.bench, enable_tf32=opts.tf32)
     c.update(kimg_per_tick=opts.tick, snapshot_ticks=opts.snap, state_dump_ticks=opts.dump, ckpt_ticks=opts.ckpt, double_ticks=opts.double)
     c.update(mid_t=opts.mid_t, metrics=opts.metrics, sample_ticks=opts.sample_every, eval_ticks=opts.eval_every)
 

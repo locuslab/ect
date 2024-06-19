@@ -128,6 +128,7 @@ def training_loop(
     mid_t               = None,     # Intermediate t for few-step generation.
     metrics             = None,     # Metrics for evaluation.
     cudnn_benchmark     = True,     # Enable torch.backends.cudnn.benchmark?
+    enable_tf32         = False,     # Enable tf32 for A100/H100 GPUs?
     device              = torch.device('cuda'),
 ):
     # Initialize.
@@ -137,9 +138,10 @@ def training_loop(
     torch.backends.cudnn.benchmark = cudnn_benchmark
 
     # Enable these to speed up on A100 GPUs
-    torch.backends.cudnn.allow_tf32 = False
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+    print('enable_tf32', enable_tf32)
+    torch.backends.cudnn.allow_tf32 = enable_tf32
+    torch.backends.cuda.matmul.allow_tf32 = enable_tf32
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = enable_tf32
 
     # Select batch size per GPU.
     batch_gpu_total = batch_size // dist.get_world_size()
