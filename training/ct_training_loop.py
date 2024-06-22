@@ -346,15 +346,20 @@ def training_loop(
             del images
     
         # Evaluation
-        # if (eval_ticks is not None) and (done or cur_tick % eval_ticks == 0) and cur_tick != 0:
-        if (eval_ticks is not None) and (done or cur_tick % eval_ticks == 0):
+        if (eval_ticks is not None) and (done or cur_tick % eval_ticks == 0) and cur_tick > 0:
             dist.print0('Evaluating models...')
-            for metric in metrics:
-                result_dict = metric_main.calc_metric(metric=metric, 
+            result_dict = metric_main.calc_metric(metric='fid50k_full', 
                     generator_fn=generator_fn, G=ema, G_kwargs={},
                     dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
-                if dist.get_rank() == 0:
-                    metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}.pkl')                        
+            if dist.get_rank() == 0:
+                metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}.pkl')                        
+            
+            few_step_fn = functools.partial(generator_fn, mid_t=mid_t)
+            result_dict = metric_main.calc_metric(metric='two_step_fid50k_full', 
+                    generator_fn=few_step_fn, G=ema, G_kwargs={},
+                    dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
+            if dist.get_rank() == 0:
+                metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}.pkl')                        
 
         # Update logs.
         training_stats.default_collector.update()
