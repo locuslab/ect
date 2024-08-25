@@ -7,7 +7,7 @@ ECT unlocks SoTA few-step generative abilities through a simple yet principled a
 Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only need to fine-tune a bit. :D
 
 <div align="center">
-    <img src="./assets/learning_scheme.jpg" width="500" alt="Comparison of Learning Schemes">
+    <img src="./assets/learning_scheme.jpg" width="1000" alt="Comparison of Learning Schemes">
 </div>
 
 ## ⭐ Update ⭐
