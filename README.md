@@ -2,7 +2,8 @@
 
 Pytorch implementation for [Easy Consistency Tuning (ECT)](https://www.notion.so/gsunshine/Consistency-Models-Made-Easy-954205c0b4a24c009f78719f43b419cc).
 
-ECT unlocks SoTA few-step generative abilities through a simple yet principled approach. With just a negligible tuning cost, ECT demonstrates promising early results while benefiting from the scaling in training FLOPs to continuously enhance its few-step generation capability.
+ECT unlocks state-of-the-art (SoTA) few-step generative abilities through a simple yet principled approach. 
+With minimal tuning costs, ECT demonstrates promising early results and scales with training FLOPs and model sizes.
 
 Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only need to fine-tune a bit. :D
 
@@ -14,6 +15,7 @@ Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only ne
 
 Baking more in the oven. 🙃 
 
+- **2024.09.23** - Add Gradscaler for Mixed Precision Training. To use mixed precision with GradScaler, switch to the `amp` [branch](https://github.com/locuslab/ect/tree/amp): `git checkout amp`.
 - **2024.04.27** - Upgrade environment to Pytorch 2.3.0.
 - **2024.04.12** - ECMs can now surpass SoTA GANs using 1 model step and SoTA Diffusion Models using 2 model steps on CIFAR10. Checkpoints available.
 
@@ -28,11 +30,11 @@ conda env create -f env.yml
 
 ## Datasets
 
-Prepare the dataset to the EDM's format. See a reference [here](https://github.com/NVlabs/edm?tab=readme-ov-file#preparing-datasets).
+Prepare the dataset in the EDM's format. See a reference [here](https://github.com/NVlabs/edm?tab=readme-ov-file#preparing-datasets).
 
 ## Training
 
-Run the following command to tune your SoTA 2-step ECM and suppass Consistency Distillation (CD) within 1 A100 GPU hour. 
+Run the following command to tune your SoTA 2-step ECM and match Consistency Distillation (CD) within 1 A100 GPU hour. 
 
 ```bash
 bash run_ecm_1hour.sh 1 <PORT> --desc bs128.1hour
@@ -45,6 +47,18 @@ bash run_ecm.sh <NGPUs> <PORT> --desc bs128.200k
 ```
 
 Replace NGPUs and PORT with the number of GPUs used for training and the port number for DDP sync.
+
+### Half Precision Training
+
+In this branch, we enable fp16 training with AMP GradScaler for more stable training dynamics.
+To enable fp16 and GradScaler, add the following arguments to your script:
+
+```bash
+bash run_ecm_1hour.sh 1 <PORT> --desc bs128.1hour --fp16=True --enable_amp=True
+```
+
+For more information, please refer to this [PR](https://github.com/locuslab/ect/pull/13). 
+Full support for Automatic Mixed Precision (AMP) will be added later.
 
 ## Evaluation
 
@@ -105,17 +119,16 @@ More checkpoints will be available later.
 
 ## Contact
 
-Please drop me an email at zhengyanggeng@gmail.com if you'd like to train models together!!!
-
-Feel free to contact me if you have additional questions or have interests in collaboration. Find me at [Twitter](https://twitter.com/ZhengyangGeng) or [WeChat](https://github.com/Gsunshine/Enjoy-Hamburger/blob/main/assets/WeChat.jpg). :D
+Feel free to drop me an email at zhengyanggeng@gmail.com if you have additional questions or are interested in collaboration. You can also find me on [Twitter](https://twitter.com/ZhengyangGeng) or [WeChat](https://github.com/Gsunshine/Enjoy-Hamburger/blob/main/assets/WeChat.jpg).
 
 ## Citation
 
 ```bibtex
-@misc{ect,
-    title  = {Consistency Models Made Easy},
-    author = {Geng, Zhengyang and Luo, William and Pokle, Ashwini and Kolter, Zico},
-    year   = {2024},
-    url    = {https://gsunshine.notion.site/Consistency-Models-Made-Easy-954205c0b4a24c009f78719f43b419cc?pvs=4}
+@article{ect,
+  title={Consistency Models Made Easy},
+  author={Geng, Zhengyang and Pokle, Ashwini and Luo, William and Lin, Justin and Kolter, J Zico},
+  journal={arXiv preprint arXiv:2406.14548},
+  year={2024}
 }
 ```
+
