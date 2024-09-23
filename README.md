@@ -14,6 +14,7 @@ Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only ne
 
 Baking more in the oven. 🙃 
 
+- **2024.09.23** - Add Gradscaler for Mixed Precision Training. To use mixed precision with GradScaler, switch to the [`amp` branch](https://github.com/locuslab/ect/tree/amp): `git checkout amp`.
 - **2024.04.27** - Upgrade environment to Pytorch 2.3.0.
 - **2024.04.12** - ECMs can now surpass SoTA GANs using 1 model step and SoTA Diffusion Models using 2 model steps on CIFAR10. Checkpoints available.
 
@@ -45,6 +46,18 @@ bash run_ecm.sh <NGPUs> <PORT> --desc bs128.200k
 ```
 
 Replace NGPUs and PORT with the number of GPUs used for training and the port number for DDP sync.
+
+### Half Precision Training
+
+In this branch, we enable fp16 training with AMP GradScaler for more stable training dynamics.
+To enable fp16 and GradScaler, add the following arguments to your script:
+
+```bash
+bash run_ecm_1hour.sh 1 <PORT> --desc bs128.1hour --fp16=True --enable_amp=True
+```
+
+For more information, please refer to this [PR](https://github.com/locuslab/ect/pull/13). 
+Full support for Automatic Mixed Precision (AMP) will be added later.
 
 ## Evaluation
 
