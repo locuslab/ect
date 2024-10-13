@@ -6,13 +6,15 @@ import pickle
 import psutil
 import functools
 import PIL.Image
+
 import numpy as np
 import torch
+import wandb
+
 import dnnlib
 from torch_utils import distributed as dist
 from torch_utils import training_stats
 from torch_utils import misc
-
 from metrics import metric_main
 
 #----------------------------------------------------------------------------
@@ -86,7 +88,7 @@ def generator_fn(
     t_steps = torch.tensor([t_max]+list(mid_t), dtype=torch.float64, device=latents.device)
 
     # t_0 = T, t_N = 0
-    t_steps = torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])
+    t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])
 
     # Sampling steps 
     x = latents.to(torch.float64) * t_steps[0]
@@ -97,6 +99,18 @@ def generator_fn(
     return x
 
 #----------------------------------------------------------------------------
+# Learning rate decay schedule used in the paper "Analyzing and Improving
+# the Training Dynamics of Diffusion Models".
+
+def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3, rampup_kimg=None):
+    lr = ref_lr
+    if ref_batches > 0:
+        lr /= np.sqrt(max(cur_nimg / (ref_batches * batch_size), 1))
+    if rampup_kimg:
+        lr *= min(cur_nimg / (rampup_kimg * 1e3), 1)
+    return lr
+
+#----------------------------------------------------------------------------
 
 def training_loop(
     run_dir             = '.',      # Output directory.
@@ -104,8 +118,8 @@ def training_loop(
     data_loader_kwargs  = {},       # Options for torch.utils.data.DataLoader.
     network_kwargs      = {},       # Options for model and preconditioning.
     loss_kwargs         = {},       # Options for loss function.
+    lr_kwargs           = {},       # Options for learning rate.
     optimizer_kwargs    = {},       # Options for optimizer.
-    augment_kwargs      = None,     # Options for augmentation pipeline, None = disable.
     seed                = 0,        # Global random seed.
     batch_size          = 512,      # Total batch size for one training iteration.
     batch_gpu           = None,     # Limit batch size per GPU, None = no limit.
@@ -127,9 +141,8 @@ def training_loop(
     resume_tick         = 0,        # Start from the given training progress.
     mid_t               = None,     # Intermediate t for few-step generation.
     metrics             = None,     # Metrics for evaluation.
+    wandb_log           = True,     # Enable wandb?
     cudnn_benchmark     = True,     # Enable torch.backends.cudnn.benchmark?
-    enable_tf32         = False,    # Enable tf32 for A100/H100 GPUs?
-    enable_amp          = False,    # Enable torch.cuda.amp.GradScaler
     device              = torch.device('cuda'),
 ):
     # Initialize.
@@ -137,12 +150,9 @@ def training_loop(
     np.random.seed((seed * dist.get_world_size() + dist.get_rank()) % (1 << 31))
     torch.manual_seed(np.random.randint(1 << 31))
     torch.backends.cudnn.benchmark = cudnn_benchmark
-
-    # Enable these to speed up on A100 GPUs
-    print('enable_tf32', enable_tf32)
-    torch.backends.cudnn.allow_tf32 = enable_tf32
-    torch.backends.cuda.matmul.allow_tf32 = enable_tf32
-    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = enable_tf32
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
     # Select batch size per GPU.
     batch_gpu_total = batch_size // dist.get_world_size()
@@ -167,20 +177,9 @@ def training_loop(
     dist.print0('Setting up optimizer...')
     loss_fn = dnnlib.util.construct_class_by_name(**loss_kwargs)
     optimizer = dnnlib.util.construct_class_by_name(params=net.parameters(), **optimizer_kwargs) # subclass of torch.optim.Optimizer
-    augment_pipe = dnnlib.util.construct_class_by_name(**augment_kwargs) if augment_kwargs is not None else None # training.augment.AugmentPipe
-    
-    # Automatic Mixed Precision
-    dist.print0(f'GradScaler enabled: {enable_amp} for mixed preicision training')
-    if enable_amp:
-        # https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html#adding-gradscaler
-        # https://pytorch.org/docs/stable/notes/amp_examples.html#gradient-accumulation
-        dist.print0(f'Setting up GradScaler...')
-        scaler = torch.cuda.amp.GradScaler()
-        dist.print0(f'Loss scaling is overwritten when GradScaler is enabled')
     
     dist.print0('Setting up DDP...')
     ddp = torch.nn.parallel.DistributedDataParallel(net, device_ids=[device], broadcast_buffers=False)
-    ema = copy.deepcopy(net).eval().requires_grad_(False)
     
     # Stats
     if dist.get_rank() == 0:
@@ -199,22 +198,23 @@ def training_loop(
             data = pickle.load(f)
         if dist.get_rank() == 0:
             torch.distributed.barrier() # other ranks follow
-        misc.copy_params_and_buffers(src_module=data['ema'], dst_module=net, require_all=False)
-        misc.copy_params_and_buffers(src_module=data['ema'], dst_module=ema, require_all=False)
+        misc.copy_params_and_buffers(src_module=data['ema'], dst_module=net, require_all=True)
         del data # conserve memory
+
+    dist.print0('Setting up EMA...')
+    ema_kwargs = dict(class_name='training.phema.PowerFunctionEMA')
+    ema        = dnnlib.util.construct_class_by_name(net=net, **ema_kwargs) if ema_kwargs is not None else None
+
+    online_ema_kwargs = dict(class_name='training.phema.TraditionalEMA', ema_beta=ema_beta)
+    online_ema = dnnlib.util.construct_class_by_name(net=net, **online_ema_kwargs)
+
     if resume_state_dump:
         dist.print0(f'Loading training state from "{resume_state_dump}"...')
         data = torch.load(resume_state_dump, map_location=torch.device('cpu'))
         misc.copy_params_and_buffers(src_module=data['net'], dst_module=net, require_all=True)
         optimizer.load_state_dict(data['optimizer_state'])
-        if enable_amp:
-            if 'gradscaler_state' in data:
-                # NOTE(aiihn): Although not loading the state_dict of the GradScaler works well, 
-                # loading it can improve reproducibility.
-                dist.print0(f'Loading GradScaler state from "{resume_state_dump}"...')
-                scaler.load_state_dict(data['gradscaler_state'])
-            else:
-                dist.print0(f'GradScaler state is not found in "{resume_state_dump}", using the default state.')
+        ema.load_state_dict(data['ema_state'])
+        online_ema.load_state_dict(data['online_ema_state'])
         del data # conserve memory
     
     # Export sample images.
@@ -227,21 +227,25 @@ def training_loop(
         grid_size, images, labels = setup_snapshot_image_grid(training_set=dataset_obj)
         save_image_grid(images, os.path.join(run_dir, 'data.png'), drange=[0,255], grid_size=grid_size)
         
-        grid_z = torch.randn([labels.shape[0], ema.img_channels, ema.img_resolution, ema.img_resolution], device=device)
+        grid_z = torch.randn([labels.shape[0], net.img_channels, net.img_resolution, net.img_resolution], device=device)
         grid_z = grid_z.split(batch_gpu)
         
         grid_c = torch.from_numpy(labels).to(device)
         grid_c = grid_c.split(batch_gpu)
         
-        images = [generator_fn(ema, z, c).cpu() for z, c in zip(grid_z, grid_c)]
-        images = torch.cat(images).numpy()
-        save_image_grid(images, os.path.join(run_dir, 'model_init.png'), drange=[-1,1], grid_size=grid_size)
+        ema_list = ema.get()
+        for ema_net, ema_suffix in ema_list:
+            images = [generator_fn(ema_net, z, c).cpu() for z, c in zip(grid_z, grid_c)]
+            images = torch.cat(images).numpy()
+            save_image_grid(images, os.path.join(run_dir, f'model_init{ema_suffix}.png'), drange=[-1,1], grid_size=grid_size)
         del images
 
     # Train.
-    dist.print0(f'Training for {total_kimg} kimg...')
+    total_ticks = int(total_kimg * 1e3) / int(kimg_per_tick * 1e3)
+
+    dist.print0(f'Training for {total_kimg} kimg, {total_ticks} ticks...')
     dist.print0()
-    cur_nimg = resume_tick * kimg_per_tick * 1000
+    cur_nimg = int(resume_tick * kimg_per_tick * 1000)
     cur_tick = resume_tick
     tick_start_nimg = cur_nimg
     tick_start_time = time.time()
@@ -258,7 +262,7 @@ def training_loop(
         
     stage = cur_tick // double_ticks
     update_scheduler(loss_fn)
-
+    
     while True:
 
         # Accumulate gradients.
@@ -269,40 +273,25 @@ def training_loop(
                 images = images.to(device).to(torch.float32) / 127.5 - 1
                 labels = labels.to(device)
 
-                loss = loss_fn(net=ddp, images=images, labels=labels, augment_pipe=augment_pipe)
+                loss = loss_fn(net=ddp, images=images, labels=labels)
                 training_stats.report('Loss/loss', loss)
-                if enable_amp:
-                    scaler.scale(loss.mean()).backward()
-                else:
-                    loss.mul(loss_scaling).mean().backward()
-        
-        # NOTE(aiihn & Gsunshine): This should be further tested for AMP.
+                loss.mul(loss_scaling).mean().backward()
+                
+        # Update weights.
+        lr = learning_rate_schedule(cur_nimg=cur_nimg, batch_size=batch_size, rampup_kimg=lr_rampup_kimg, **lr_kwargs)
+        for g in optimizer.param_groups:
+            g['lr'] = lr
         for param in net.parameters():
             if param.grad is not None:
-                torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
-        
-        # LR scheduler (if needed in the future)
-        # for g in optimizer.param_groups:
-        #     g['lr'] = optimizer_kwargs['lr'] * min(cur_nimg / max(lr_rampup_kimg * 1000, 1e-8), 1)
- 
-        # Update weights.
-        if enable_amp:
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-           optimizer.step()
+                torch.nan_to_num(param.grad, nan=0, posinf=0, neginf=0, out=param.grad)
+        optimizer.step()
 
         # Update EMA.
-        if ema_halflife_kimg is not None:
-            ema_halflife_nimg = ema_halflife_kimg * 1000
-            if ema_rampup_ratio is not None:
-                ema_halflife_nimg = min(ema_halflife_nimg, cur_nimg * ema_rampup_ratio)
-            ema_beta = 0.5 ** (batch_size / max(ema_halflife_nimg, 1e-8))
-        for p_ema, p_net in zip(ema.parameters(), net.parameters()):
-            p_ema.copy_(p_net.detach().lerp(p_ema, ema_beta))
+        cur_nimg += batch_size
+        ema.update(cur_nimg=cur_nimg, batch_size=batch_size)
+        online_ema.update(cur_nimg=cur_nimg, batch_size=batch_size)
 
         # Perform maintenance tasks once per tick.
-        cur_nimg += batch_size
         done = (cur_nimg >= total_kimg * 1000)
         if (not done) and (cur_tick != 0) and (cur_nimg < tick_start_nimg + kimg_per_tick * 1000):
             continue
@@ -312,7 +301,8 @@ def training_loop(
         fields = []
         fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d}"]
         fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<9.1f}"]
-        fields += [f"loss {training_stats.default_collector['Loss/loss']:<9.5f}"]
+        fields += [f"loss {training_stats.default_collector['Loss/loss']:<5.5f}"]
+        fields += [f"lr {training_stats.report0('Loss/lr', lr):<.5f}"]
         fields += [f"time {dnnlib.util.format_time(training_stats.report0('Timing/total_sec', tick_end_time - start_time)):<12s}"]
         fields += [f"sec/tick {training_stats.report0('Timing/sec_per_tick', tick_end_time - tick_start_time):<7.1f}"]
         fields += [f"sec/kimg {training_stats.report0('Timing/sec_per_kimg', (tick_end_time - tick_start_time) / (cur_nimg - tick_start_nimg) * 1e3):<7.2f}"]
@@ -323,78 +313,113 @@ def training_loop(
         torch.cuda.reset_peak_memory_stats()
         dist.print0(' '.join(fields))
 
+        # Log training stats to Wandb if needed
+        if wandb_log and dist.get_rank() == 0:
+            wandb.log({
+                    "tick": cur_tick,
+                    "kimg": cur_nimg / 1e3,
+                    "train_loss": training_stats.default_collector['Loss/loss'],
+                    "lr": lr,
+                })
+
         # Check for abort.
         if (not done) and dist.should_stop():
             done = True
             dist.print0()
             dist.print0('Aborting...')
+        
+        # Save latest checkpoints
+        if (ckpt_ticks is not None) and (done or cur_tick % ckpt_ticks == 0) and cur_tick > resume_tick:
+            dist.print0(f'Save the latest checkpoint at {cur_tick} tick, {cur_nimg//1000:07d} img... ', end='', flush=True)
+            if dist.get_rank() == 0:
+                torch.save(dict(net=net, optimizer_state=optimizer.state_dict(), ema_state=ema.state_dict(), online_ema_state=online_ema.state_dict(),), 
+                        os.path.join(run_dir, f'training-state-latest.pt'))
+            dist.print0('done')
+            misc.check_ddp_consistency(net)
 
         # Save network snapshot.
-        if (snapshot_ticks is not None) and (done or cur_tick % snapshot_ticks == 0) and cur_tick != 0:
-            data = dict(ema=ema, loss_fn=loss_fn, augment_pipe=augment_pipe, dataset_kwargs=dict(dataset_kwargs))
-            for key, value in data.items():
-                if isinstance(value, torch.nn.Module):
-                    value = copy.deepcopy(value).eval().requires_grad_(False)
-                    misc.check_ddp_consistency(value)
-                    data[key] = value.cpu()
-                del value # conserve memory
-            if dist.get_rank() == 0:
-                with open(os.path.join(run_dir, f'network-snapshot-{cur_tick:06d}.pkl'), 'wb') as f:
-                    pickle.dump(data, f)
+        if (snapshot_ticks is not None) and (done or cur_tick % snapshot_ticks == 0) and cur_tick > resume_tick:
+            ema_list = ema.get()
+            for ema_net, ema_suffix in ema_list:
+                data = dict(ema=copy.deepcopy(ema_net).cpu().eval().requires_grad_(False))
+                fname = f'network-snapshot-{cur_nimg//1000:07d}{ema_suffix}.pkl'
+                dist.print0(f'Saving {fname} ... ', end='', flush=True)
+                if dist.get_rank() == 0:
+                    with open(os.path.join(run_dir, fname), 'wb') as f:
+                        pickle.dump(data, f)
+                dist.print0('done')
             del data # conserve memory
 
         # Save full dump of the training state.
-        if (state_dump_ticks is not None) and (done or cur_tick % state_dump_ticks == 0) and cur_tick != 0 and dist.get_rank() == 0:
-            data = dict(net=net, optimizer_state=optimizer.state_dict())
-            if enable_amp:
-                data.update(gradscaler_state=scaler.state_dict())
-            torch.save(data, os.path.join(run_dir, f'training-state-{cur_tick:06d}.pt'))
-
-        # Save latest checkpoints
-        if (ckpt_ticks is not None) and (done or cur_tick % ckpt_ticks == 0) and cur_tick != 0:
-            dist.print0(f'Save the latest checkpoint at {cur_tick:06d} img...')
-            data = dict(ema=ema, loss_fn=loss_fn, augment_pipe=augment_pipe, dataset_kwargs=dict(dataset_kwargs))
-            for key, value in data.items():
-                if isinstance(value, torch.nn.Module):
-                    value = copy.deepcopy(value).eval().requires_grad_(False)
-                    misc.check_ddp_consistency(value)
-                    data[key] = value.cpu()
-                del value # conserve memory
+        if (state_dump_ticks is not None) and (done or cur_tick % state_dump_ticks == 0) and cur_tick > resume_tick:
             if dist.get_rank() == 0:
-                with open(os.path.join(run_dir, f'network-snapshot-latest.pkl'), 'wb') as f:
-                    pickle.dump(data, f)
-            del data # conserve memory
-
-            if dist.get_rank() == 0:
-                data = dict(net=net, optimizer_state=optimizer.state_dict())
-                if enable_amp:
-                    data.update(gradscaler_state=scaler.state_dict())
-                torch.save(data, os.path.join(run_dir, f'training-state-latest.pt'))
-
-        # Sample Img
+                torch.save(dict(net=net, optimizer_state=optimizer.state_dict(), ema_state=ema.state_dict(), online_ema_state=online_ema.state_dict(),), 
+                        os.path.join(run_dir, f'training-state-{cur_tick:06d}-{cur_nimg//1000:07d}.pt'))
+            misc.check_ddp_consistency(net)
+               
+       # Sample Img
         if (sample_ticks is not None) and (done or cur_tick % sample_ticks == 0) and dist.get_rank() == 0:
             dist.print0('Exporting sample images...')
-            images = [generator_fn(ema, z, c).cpu() for z, c in zip(grid_z, grid_c)]
-            images = torch.cat(images).numpy()
-            save_image_grid(images, os.path.join(run_dir, f'{cur_tick:06d}.png'), drange=[-1,1], grid_size=grid_size)
-            del images
-    
-        # Evaluation
-        if (eval_ticks is not None) and (done or cur_tick % eval_ticks == 0) and cur_tick > 0:
-            dist.print0('Evaluating models...')
-            result_dict = metric_main.calc_metric(metric='fid50k_full', 
-                    generator_fn=generator_fn, G=ema, G_kwargs={},
-                    dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
-            if dist.get_rank() == 0:
-                metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}.pkl')                        
-            
-            few_step_fn = functools.partial(generator_fn, mid_t=mid_t)
-            result_dict = metric_main.calc_metric(metric='two_step_fid50k_full', 
-                    generator_fn=few_step_fn, G=ema, G_kwargs={},
-                    dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
-            if dist.get_rank() == 0:
-                metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}.pkl')                        
+            ema_list = ema.get()
+            for ema_net, ema_suffix in ema_list:
+                images = [generator_fn(ema_net, z, c).cpu() for z, c in zip(grid_z, grid_c)]
+                images = torch.cat(images).numpy()
+                save_image_grid(images, os.path.join(run_dir, f'1_step_{cur_tick:06d}_{cur_nimg//1000:07d}{ema_suffix}.png'), drange=[-1,1], grid_size=grid_size)
 
+                few_step_fn = functools.partial(generator_fn, mid_t=mid_t)
+                images = [few_step_fn(ema_net, z, c).cpu() for z, c in zip(grid_z, grid_c)]
+                images = torch.cat(images).numpy()
+                save_image_grid(images, os.path.join(run_dir, f'2_step_{cur_tick:06d}_{cur_nimg//1000:07d}{ema_suffix}.png'), drange=[-1,1], grid_size=grid_size)
+            del images
+
+        # Online EMA Evaluation
+        # NOTE(gsunshine): Skip early stage evaluation to save time if you want.
+        # online_eval_tick = 500 if cur_tick < 1000 else 100
+        online_eval_tick = eval_ticks
+        if (eval_ticks is not None) and (done or cur_tick % online_eval_tick == 0) and cur_tick > resume_tick:
+            dist.print0('Evaluating online EMA models...')
+            ema_list = online_ema.get()
+            ema_list = ema_list if isinstance(ema_list, list) else [(ema_list, '')]
+            for ema_net, ema_suffix in ema_list:
+                one_step_results = metric_main.calc_metric(metric='fid50k_full',
+                        generator_fn=generator_fn, G=ema_net, G_kwargs={},
+                        dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
+                if dist.get_rank() == 0:
+                    metric_main.report_metric(one_step_results, run_dir=run_dir, snapshot_pkl=f'network-snapshot-online-{cur_tick:06d}-{cur_nimg//1000:07d}.pkl')
+           
+                few_step_fn = functools.partial(generator_fn, mid_t=mid_t)
+                few_step_results = metric_main.calc_metric(metric='two_step_fid50k_full', 
+                        generator_fn=few_step_fn, G=ema_net, G_kwargs={},
+                        dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
+                if dist.get_rank() == 0:
+                    metric_main.report_metric(few_step_results, run_dir=run_dir, snapshot_pkl=f'network-snapshot-online-{cur_nimg//1000:07d}.pkl')
+
+        # PhEMA Evaluation
+        # NOTE(gsunshine): Skip early stage evaluation to save time if you want.
+        # if (eval_ticks is not None) and (done or cur_tick % eval_ticks == 0) and cur_tick > resume_tick and cur_tick > 1500:
+        if (eval_ticks is not None) and (done or cur_tick % eval_ticks == 0) and cur_tick > resume_tick:
+            dist.print0('Evaluating PH-EMA models...')
+            ema_list = ema.get()
+            for ema_net, ema_suffix in ema_list:
+                one_step_results = metric_main.calc_metric(metric='fid50k_full',
+                        generator_fn=generator_fn, G=ema_net, G_kwargs={},
+                        dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
+                if dist.get_rank() == 0:
+                    metric_main.report_metric(one_step_results, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}-{cur_nimg//1000:07d}{ema_suffix}.pkl')
+           
+                few_step_fn = functools.partial(generator_fn, mid_t=mid_t)
+                few_step_results = metric_main.calc_metric(metric='two_step_fid50k_full', 
+                        generator_fn=few_step_fn, G=ema_net, G_kwargs={},
+                        dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
+                if dist.get_rank() == 0:
+                    metric_main.report_metric(few_step_results, run_dir=run_dir, snapshot_pkl=f'network-snapshot-{cur_tick:06d}-{cur_nimg//1000:07d}{ema_suffix}.pkl')   
+
+                if wandb_log and dist.get_rank() == 0:
+                    wandb.log({
+                        f"ema{ema_suffix} 1-step fid": one_step_results["results"]["fid50k_full"],
+                        f"ema{ema_suffix} 2-step fid": few_step_results["results"]["fid50k_full"]
+                        })                     
+ 
         # Update logs.
         training_stats.default_collector.update()
         if dist.get_rank() == 0:
@@ -423,19 +448,23 @@ def training_loop(
     
     if dist.get_rank() == 0:
         dist.print0('Exporting final sample images...')
-        images = [few_step_fn(ema, z, c).cpu() for z, c in zip(grid_z, grid_c)]
-        images = torch.cat(images).numpy()
-        save_image_grid(images, os.path.join(run_dir, 'final.png'), drange=[-1,1], grid_size=grid_size)
+        ema_list = ema.get()
+        for ema_net, ema_suffix in ema_list:
+            images = [few_step_fn(ema_net, z, c).cpu() for z, c in zip(grid_z, grid_c)]
+            images = torch.cat(images).numpy()
+            save_image_grid(images, os.path.join(run_dir, f'final{ema_suffix}.png'), drange=[-1,1], grid_size=grid_size)
         del images
 
     dist.print0('Evaluating few-step generation...')
     for _ in range(3):
-        for metric in metrics:
-            result_dict = metric_main.calc_metric(metric=metric, 
-                generator_fn=few_step_fn, G=ema, G_kwargs={},
-                dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
-            if dist.get_rank() == 0:
-                metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl='network-snapshot-latest.pkl')
+        ema_list = ema.get()
+        for ema_net, ema_suffix in ema_list:
+            for metric in metrics:
+                result_dict = metric_main.calc_metric(metric=metric, 
+                    generator_fn=few_step_fn, G=ema_net, G_kwargs={},
+                    dataset_kwargs=dataset_kwargs, num_gpus=dist.get_world_size(), rank=dist.get_rank(), device=device)
+                if dist.get_rank() == 0:
+                    metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=f'network-snapshot-final{ema_suffix}.pkl')
 
     # Done.
     dist.print0()

@@ -40,19 +40,15 @@ def constant(value, shape=None, dtype=None, device=None, memory_format=None):
     return tensor
 
 #----------------------------------------------------------------------------
-# Replace NaN/Inf with specified numerical values.
+# Variant of constant() that inherits dtype and device from the given
+# reference tensor by default.
 
-try:
-    nan_to_num = torch.nan_to_num # 1.8.0a0
-except AttributeError:
-    def nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None): # pylint: disable=redefined-builtin
-        assert isinstance(input, torch.Tensor)
-        if posinf is None:
-            posinf = torch.finfo(input.dtype).max
-        if neginf is None:
-            neginf = torch.finfo(input.dtype).min
-        assert nan == 0
-        return torch.clamp(input.unsqueeze(0).nansum(0), min=neginf, max=posinf, out=out)
+def const_like(ref, value, shape=None, dtype=None, device=None, memory_format=None):
+    if dtype is None:
+        dtype = ref.dtype
+    if device is None:
+        device = ref.device
+    return constant(value, shape=shape, dtype=dtype, device=device, memory_format=memory_format)
 
 #----------------------------------------------------------------------------
 # Symbolic assert.
@@ -185,7 +181,7 @@ def check_ddp_consistency(module, ignore_regex=None):
             continue
         tensor = tensor.detach()
         if tensor.is_floating_point():
-            tensor = nan_to_num(tensor)
+            tensor = torch.nan_to_num(tensor)
         other = tensor.clone()
         torch.distributed.broadcast(tensor=other, src=0)
         assert (tensor == other).all(), fullname
@@ -193,6 +189,7 @@ def check_ddp_consistency(module, ignore_regex=None):
 #----------------------------------------------------------------------------
 # Print summary table of module hierarchy.
 
+@torch.no_grad()
 def print_module_summary(module, inputs, max_nesting=3, skip_redundant=True):
     assert isinstance(module, torch.nn.Module)
     assert not isinstance(module, torch.jit.ScriptModule)
@@ -221,6 +218,7 @@ def print_module_summary(module, inputs, max_nesting=3, skip_redundant=True):
     tensors_seen = set()
     for e in entries:
         e.unique_params = [t for t in e.mod.parameters() if id(t) not in tensors_seen]
+        e.unique_grad_params = [t for t in e.mod.parameters() if id(t) not in tensors_seen and t.requires_grad]
         e.unique_buffers = [t for t in e.mod.buffers() if id(t) not in tensors_seen]
         e.unique_outputs = [t for t in e.outputs if id(t) not in tensors_seen]
         tensors_seen |= {id(t) for t in e.unique_params + e.unique_buffers + e.unique_outputs}
@@ -230,20 +228,23 @@ def print_module_summary(module, inputs, max_nesting=3, skip_redundant=True):
         entries = [e for e in entries if len(e.unique_params) or len(e.unique_buffers) or len(e.unique_outputs)]
 
     # Construct table.
-    rows = [[type(module).__name__, 'Parameters', 'Buffers', 'Output shape', 'Datatype']]
+    rows = [[type(module).__name__, 'Parameters', 'Grad Parameters', 'Buffers', 'Output shape', 'Datatype']]
     rows += [['---'] * len(rows[0])]
     param_total = 0
+    param_grad_total = 0
     buffer_total = 0
     submodule_names = {mod: name for name, mod in module.named_modules()}
     for e in entries:
         name = '<top-level>' if e.mod is module else submodule_names[e.mod]
         param_size = sum(t.numel() for t in e.unique_params)
+        grad_param_size = sum(t.numel() for t in e.unique_grad_params)
         buffer_size = sum(t.numel() for t in e.unique_buffers)
         output_shapes = [str(list(t.shape)) for t in e.outputs]
         output_dtypes = [str(t.dtype).split('.')[-1] for t in e.outputs]
         rows += [[
             name + (':0' if len(e.outputs) >= 2 else ''),
             str(param_size) if param_size else '-',
+            str(grad_param_size) if grad_param_size else '-',
             str(buffer_size) if buffer_size else '-',
             (output_shapes + ['-'])[0],
             (output_dtypes + ['-'])[0],
@@ -251,9 +252,10 @@ def print_module_summary(module, inputs, max_nesting=3, skip_redundant=True):
         for idx in range(1, len(e.outputs)):
             rows += [[name + f':{idx}', '-', '-', output_shapes[idx], output_dtypes[idx]]]
         param_total += param_size
+        param_grad_total += grad_param_size
         buffer_total += buffer_size
     rows += [['---'] * len(rows[0])]
-    rows += [['Total', str(param_total), str(buffer_total), '-', '-']]
+    rows += [['Total', str(param_total), str(param_grad_total), str(buffer_total), '-', '-']]
 
     # Print table.
     widths = [max(len(cell) for cell in column) for column in zip(*rows)]
