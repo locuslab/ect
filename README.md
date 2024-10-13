@@ -11,10 +11,20 @@ Try your own [Consistency Models](https://arxiv.org/abs/2303.01469)! You only ne
     <img src="./assets/learning_scheme.jpg" width="1000" alt="Comparison of Learning Schemes">
 </div>
 
+## Introduction
+
+This repository is organized in a multi-branch structure, with each branch offering a minimal implementation for a specific purpose. 
+The current branches support the following training protocols:
+
+- `main`: ECT on CIFAR-10. Best for understanding CMs and fast prototyping.
+- `amp`: Mixed Precision training with GradScaler on CIFAR-10.
+- `imgnet`: ECT ImageNet 64x64.
+
 ## ⭐ Update ⭐
 
 Baking more in the oven. 🙃 
 
+- **2024.10.12** - Add ECT code for ImgNet 64x64. Switch to the `imgnet` [branch](https://github.com/locuslab/ect/tree/imgnet): `git checkout imgnet`.
 - **2024.09.23** - Add Gradscaler for Mixed Precision Training. To use mixed precision with GradScaler, switch to the `amp` [branch](https://github.com/locuslab/ect/tree/amp): `git checkout amp`.
 - **2024.04.27** - Upgrade environment to Pytorch 2.3.0.
 - **2024.04.12** - ECMs can now surpass SoTA GANs using 1 model step and SoTA Diffusion Models using 2 model steps on CIFAR10. Checkpoints available.
@@ -109,17 +119,15 @@ Using [dgm-eval](https://github.com/layer6ai-labs/dgm-eval/tree/master), we have
 ECM                                                                           | 198.51 | 1   | 
 ECM                                                                           | 128.63 | 2   |
 
-Even without combining with other generative mechanisms like GANs or diffusion distillation like Score Distillation, ECT is capable of generating high-quality samples much faster than SoTA diffusion models and much better than ~~SoTA GANs~~ SoTA Diffusion Models and GANs.
+Without combining with other generative mechanisms like GANs or diffusion distillation like Score Distillation, ECT is capable of generating high-quality samples much faster than SoTA diffusion models and much better than ~~SoTA GANs~~ SoTA Diffusion Models and GANs.
 
 ## Checkpoints
-
-More checkpoints will be available later.
 
 - CIFAR10 $\mathrm{FD}_{\text{DINOv2}}$ [checkpoint](https://drive.google.com/file/d/1WN_eLTrcl-vB7fMc1HADpacgcO4SNJ_1/view?usp=sharing).
 
 ## Contact
 
-Feel free to drop me an email at zhengyanggeng@gmail.com if you have additional questions or are interested in collaboration. You can also find me on [Twitter](https://twitter.com/ZhengyangGeng) or [WeChat](https://github.com/Gsunshine/Enjoy-Hamburger/blob/main/assets/WeChat.jpg).
+Feel free to drop me an email at zhengyanggeng@gmail.com if you have additional questions or are interested in collaboration. You can find me on [Twitter](https://twitter.com/ZhengyangGeng) or [WeChat](https://github.com/Gsunshine/Enjoy-Hamburger/blob/main/assets/WeChat.jpg).
 
 ## Citation
 
